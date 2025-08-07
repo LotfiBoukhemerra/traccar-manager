@@ -56,8 +56,9 @@ class _MainScreenState extends State<MainScreen> {
     _appLinksSubscription = _appLinks.uriLinkStream.listen((uri) {
       if (uri.scheme == 'org.traccar.manager') {
         final baseUri = Uri.parse(_getUrl());
-        final updatedQueryParameters = Map<String, String>.from(uri.queryParameters)
-          ..['redirect_uri'] = uri.toString().split('?').first;
+        final updatedQueryParameters = Map<String, String>.from(
+          uri.queryParameters,
+        )..['redirect_uri'] = uri.toString().split('?').first;
         final updatedUri = uri.replace(
           scheme: baseUri.scheme,
           host: baseUri.host,
@@ -77,11 +78,18 @@ class _MainScreenState extends State<MainScreen> {
       final updatedRedirect = Uri(
         scheme: 'org.traccar.manager',
         path: originalRedirect.path,
-        queryParameters: originalRedirect.queryParameters.isEmpty ? null : originalRedirect.queryParameters,
+        queryParameters:
+            originalRedirect.queryParameters.isEmpty
+                ? null
+                : originalRedirect.queryParameters,
       );
-      final updatedQueryParameters = Map<String, String>.from(uri.queryParameters)
-        ..['redirect_uri'] = updatedRedirect.toString();
-      await launchUrl(uri.replace(queryParameters: updatedQueryParameters), mode: LaunchMode.externalApplication);
+      final updatedQueryParameters = Map<String, String>.from(
+        uri.queryParameters,
+      )..['redirect_uri'] = updatedRedirect.toString();
+      await launchUrl(
+        uri.replace(queryParameters: updatedQueryParameters),
+        mode: LaunchMode.externalApplication,
+      );
     } catch (e) {
       developer.log('Failed to launch authorize request', error: e);
     }
@@ -94,11 +102,12 @@ class _MainScreenState extends State<MainScreen> {
   }
 
   String _getUrl() {
-    return _preferences.getString(_urlKey) ?? 'https://demo.traccar.org';
+    return _preferences.getString(_urlKey) ?? 'http://197.140.11.160:8007/';
   }
 
   bool _isDownloadable(Uri uri) {
-    final lastSegment = uri.pathSegments.isNotEmpty ? uri.pathSegments.last.toLowerCase() : '';
+    final lastSegment =
+        uri.pathSegments.isNotEmpty ? uri.pathSegments.last.toLowerCase() : '';
     return ['xlsx', 'kml', 'csv', 'gpx'].contains(lastSegment);
   }
 
@@ -106,11 +115,15 @@ class _MainScreenState extends State<MainScreen> {
     try {
       final token = await _loginTokenStore.read(false);
       if (token == null) return;
-      final response = await http.get(uri, headers: {'Authorization': 'Bearer $token'});
+      final response = await http.get(
+        uri,
+        headers: {'Authorization': 'Bearer $token'},
+      );
       if (response.statusCode == 200) {
-        final directory = Platform.isAndroid
-            ? await getExternalStorageDirectory()
-            : await getApplicationDocumentsDirectory();
+        final directory =
+            Platform.isAndroid
+                ? await getExternalStorageDirectory()
+                : await getApplicationDocumentsDirectory();
         final timestamp = DateTime.now().millisecondsSinceEpoch;
         final extension = uri.pathSegments.last;
         final file = File('${directory!.path}/$timestamp.$extension');
@@ -126,9 +139,13 @@ class _MainScreenState extends State<MainScreen> {
 
   Future<void> _initWebView() async {
     _preferences = await SharedPreferencesWithCache.create(
-      sharedPreferencesOptions: Platform.isAndroid
-        ? SharedPreferencesAsyncAndroidOptions(backend: SharedPreferencesAndroidBackendLibrary.SharedPreferences)
-        : SharedPreferencesOptions(),
+      sharedPreferencesOptions:
+          Platform.isAndroid
+              ? SharedPreferencesAsyncAndroidOptions(
+                backend:
+                    SharedPreferencesAndroidBackendLibrary.SharedPreferences,
+              )
+              : SharedPreferencesOptions(),
       cacheOptions: SharedPreferencesWithCacheOptions(allowList: {'url'}),
     );
 
@@ -141,82 +158,100 @@ class _MainScreenState extends State<MainScreen> {
       }
     }
 
-    final brightness = WidgetsBinding.instance.platformDispatcher.platformBrightness;
-    final backgroundColor = brightness == Brightness.dark
-      ? const Color(0xFF000000)
-      : const Color(0xFFFFFFFF);
+    final brightness =
+        WidgetsBinding.instance.platformDispatcher.platformBrightness;
+    final backgroundColor =
+        brightness == Brightness.dark
+            ? const Color(0xFF000000)
+            : const Color(0xFFFFFFFF);
 
-    _controller = WebViewController(
-      onPermissionRequest: (request) async {
-        bool allGranted = true;
-        for (final type in request.types) {
-          PermissionStatus status;
-          switch (type) {
-            case WebViewPermissionResourceType.camera:
-              status = await Permission.camera.request();
-            default:
-              allGranted = false;
-              continue;
-          }
-          if (!status.isGranted) allGranted = false;
-        }
-        if (allGranted) {
-          await request.grant();
-        } else {
-          await request.deny();
-        }
-      },
-    )
-      ..setBackgroundColor(backgroundColor)
-      ..setJavaScriptMode(JavaScriptMode.unrestricted)
-      ..addJavaScriptChannel('appInterface', onMessageReceived: _handleWebMessage)
-      ..setNavigationDelegate(
-        NavigationDelegate(
-          onNavigationRequest: (NavigationRequest request) {
-            final uri = Uri.parse(request.url);
-            if (['response_type', 'client_id', 'redirect_uri', 'scope'].every(uri.queryParameters.containsKey)) {
-              _launchAuthorizeRequest(uri);
-              return NavigationDecision.prevent;
-            }
-            if (uri.authority != Uri.parse(_getUrl()).authority) {
-              try {
-                launchUrl(uri, mode: LaunchMode.externalApplication);
-              } catch (e) {
-                developer.log('Failed to launch url', error: e);
+    _controller =
+        WebViewController(
+            onPermissionRequest: (request) async {
+              bool allGranted = true;
+              for (final type in request.types) {
+                PermissionStatus status;
+                switch (type) {
+                  case WebViewPermissionResourceType.camera:
+                    status = await Permission.camera.request();
+                  default:
+                    allGranted = false;
+                    continue;
+                }
+                if (!status.isGranted) allGranted = false;
               }
-              return NavigationDecision.prevent;
-            }
-            if (_isDownloadable(uri)) {
-              _downloadFile(uri);
-              return NavigationDecision.prevent;
-            }
-            return NavigationDecision.navigate;
-          },
-          onPageStarted: (String url) {
-            setState(() => _loadingError = null);
-          },
-          onWebResourceError: (WebResourceError error) {
-            if (error.errorType == WebResourceErrorType.webContentProcessTerminated) {
-              _controller.reload();
-            } else if (error.isForMainFrame == true) {
-              if (error is! WebKitWebResourceError || error.errorCode != 102) {
-                final errorMessage = error.description.isNotEmpty
-                  ? error.description
-                  : error.errorType?.name ?? 'Error ${error.errorCode}';
-                setState(() => _loadingError = errorMessage);
+              if (allGranted) {
+                await request.grant();
+              } else {
+                await request.deny();
               }
-            }
-          },
-        ),
-      )
-      ..loadRequest(Uri.parse(url));
+            },
+          )
+          ..setBackgroundColor(backgroundColor)
+          ..setJavaScriptMode(JavaScriptMode.unrestricted)
+          ..addJavaScriptChannel(
+            'appInterface',
+            onMessageReceived: _handleWebMessage,
+          )
+          ..setNavigationDelegate(
+            NavigationDelegate(
+              onNavigationRequest: (NavigationRequest request) {
+                final uri = Uri.parse(request.url);
+                if ([
+                  'response_type',
+                  'client_id',
+                  'redirect_uri',
+                  'scope',
+                ].every(uri.queryParameters.containsKey)) {
+                  _launchAuthorizeRequest(uri);
+                  return NavigationDecision.prevent;
+                }
+                if (uri.authority != Uri.parse(_getUrl()).authority) {
+                  try {
+                    launchUrl(uri, mode: LaunchMode.externalApplication);
+                  } catch (e) {
+                    developer.log('Failed to launch url', error: e);
+                  }
+                  return NavigationDecision.prevent;
+                }
+                if (_isDownloadable(uri)) {
+                  _downloadFile(uri);
+                  return NavigationDecision.prevent;
+                }
+                return NavigationDecision.navigate;
+              },
+              onPageStarted: (String url) {
+                setState(() => _loadingError = null);
+              },
+              onWebResourceError: (WebResourceError error) {
+                if (error.errorType ==
+                    WebResourceErrorType.webContentProcessTerminated) {
+                  _controller.reload();
+                } else if (error.isForMainFrame == true) {
+                  if (error is! WebKitWebResourceError ||
+                      error.errorCode != 102) {
+                    final errorMessage =
+                        error.description.isNotEmpty
+                            ? error.description
+                            : error.errorType?.name ??
+                                'Error ${error.errorCode}';
+                    setState(() => _loadingError = errorMessage);
+                  }
+                }
+              },
+            ),
+          )
+          ..loadRequest(Uri.parse(url));
 
     final platformController = _controller.platform;
     if (platformController is AndroidWebViewController) {
       platformController.setGeolocationPermissionsPromptCallbacks(
         onShowPrompt: (request) async {
           final status = await Permission.location.request();
-          return GeolocationPermissionsResponse(allow: status.isGranted, retain: true);
+          return GeolocationPermissionsResponse(
+            allow: status.isGranted,
+            retain: true,
+          );
         },
       );
     }
@@ -235,15 +270,22 @@ class _MainScreenState extends State<MainScreen> {
       }
     });
     await _messaging.requestPermission();
-    await _authenticated.future.timeout(Duration(seconds: 30), onTimeout: () {});
+    await _authenticated.future.timeout(
+      Duration(seconds: 30),
+      onTimeout: () {},
+    );
     _messaging.onTokenRefresh.listen((newToken) {
       _controller.runJavaScript("updateNotificationToken?.('$newToken')");
     });
     FirebaseMessaging.onMessage.listen((RemoteMessage message) {
       final notification = message.notification;
       if (notification != null) {
-        _controller.runJavaScript("handleNativeNotification?.(${jsonEncode(message.toMap())})");
-        messengerKey.currentState?.showSnackBar(SnackBar(content: Text(notification.body ?? 'Unknown')));
+        _controller.runJavaScript(
+          "handleNativeNotification?.(${jsonEncode(message.toMap())})",
+        );
+        messengerKey.currentState?.showSnackBar(
+          SnackBar(content: Text(notification.body ?? 'Unknown')),
+        );
       }
     });
   }
@@ -257,7 +299,9 @@ class _MainScreenState extends State<MainScreen> {
         }
         final notificationToken = await _messaging.getToken();
         if (notificationToken != null) {
-          _controller.runJavaScript("updateNotificationToken?.('$notificationToken')");
+          _controller.runJavaScript(
+            "updateNotificationToken?.('$notificationToken')",
+          );
         }
       case 'authentication':
         final loginToken = await _loginTokenStore.read(true);
@@ -297,7 +341,9 @@ class _MainScreenState extends State<MainScreen> {
           await _loginTokenStore.delete();
           await _preferences.setString(_urlKey, url);
           await _controller.loadRequest(Uri.parse(url));
-          setState(() { _loadingError = null; });
+          setState(() {
+            _loadingError = null;
+          });
         },
       );
     }
